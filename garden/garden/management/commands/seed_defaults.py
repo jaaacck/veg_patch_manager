@@ -1,6 +1,6 @@
 from django.core.management.base import BaseCommand
 from django.utils.text import slugify
-from garden.models import VegEntry, Plot, Cell, Job
+from garden.models import VegEntry, Plot
 
 
 DEFAULTS = [
@@ -79,71 +79,8 @@ DEFAULTS = [
 ]
 
 
-def _sow_windows(sow_where, ss, se):
-    """Route a veg's single sow window into the matching per-method window."""
-    w = {
-        'sow_outdoors_start': 0, 'sow_outdoors_end': 0,
-        'sow_covered_start': 0, 'sow_covered_end': 0,
-        'sow_indoors_start': 0, 'sow_indoors_end': 0,
-        'plant_out_start': 0, 'plant_out_end': 0,
-    }
-    if not (ss and se):
-        return w
-    sw = (sow_where or '').strip().lower()
-    if sw == 'sow indoors':
-        w['sow_indoors_start'], w['sow_indoors_end'] = ss, se
-    elif sw == 'sow outdoors (covered)':
-        w['sow_covered_start'], w['sow_covered_end'] = ss, se
-    elif sw == 'plant out seedlings':
-        w['plant_out_start'], w['plant_out_end'] = ss, se
-    else:
-        w['sow_outdoors_start'], w['sow_outdoors_end'] = ss, se
-    return w
-
-
-# Extra variety entries — each becomes its own VegEntry under the base type,
-# inheriting the type's sow/harvest data. Gives per-variety test data.
-VARIETIES = [
-    ('Tomatoes', "Gardener's Delight"),
-    ('Tomatoes', 'San Marzano'),
-    ('Tomatoes', 'Sungold'),
-    ('Radish', 'Green Luobo'),
-    ('Radish', 'French Breakfast'),
-    ('Radish', 'Winter Radish'),
-    ('Lettuce', 'Little Gem'),
-    ('Lettuce', 'Lollo Rosso'),
-    ('Carrots', 'Nantes'),
-    ('Carrots', 'Chantenay'),
-    ('Beetroot', 'Boltardy'),
-    ('Beetroot', 'Chioggia'),
-    ('Courgette', 'Defender'),
-    ('Courgette', 'Romanesco'),
-    ('Kale', 'Cavolo Nero'),
-    ('Kale', 'Red Russian'),
-    ('French beans', 'Cobra'),
-    ('French beans', 'Borlotti'),
-]
-
-# (type, month 1-12, description) jobs applied to the base type AND its varieties.
-# Several land on summer months so the Today tab shows live jobs.
-VEG_JOBS = [
-    ('Tomatoes', 6, 'Pinch out side shoots on cordon varieties.'),
-    ('Tomatoes', 7, 'Feed weekly with a high-potash tomato food.'),
-    ('Tomatoes', 8, 'Remove lower leaves to improve airflow.'),
-    ('Courgette', 6, 'Pick fruits young and often to keep plants cropping.'),
-    ('Courgette', 7, 'Water deeply in dry spells; watch for mildew.'),
-    ('Radish', 6, 'Sow a fresh short row for a steady supply.'),
-    ('Lettuce', 6, 'Sow little and often; keep watered to prevent bolting.'),
-    ('Carrots', 6, 'Thin seedlings on a still evening to deter carrot fly.'),
-    ('Beetroot', 7, 'Thin clusters; use the thinnings as baby leaves.'),
-    ('French beans', 7, 'Pick regularly so pods keep coming.'),
-    ('Kale', 9, 'Start picking lower leaves once large enough.'),
-    ('Garlic', 11, 'Plant cloves pointed-end up before the hard frosts.'),
-]
-
-
 class Command(BaseCommand):
-    help = "Seed default VegEntry rows (72 vegetables), variety entries and jobs."
+    help = "Seed default VegEntry rows (72 vegetables) and 16 Plot rows if missing."
 
     def handle(self, *args, **kwargs):
         created_veg = 0
@@ -163,59 +100,17 @@ class Command(BaseCommand):
                     per_sq_ft=persqft,
                     days_to_harvest=days,
                     notes=notes,
-                    **_sow_windows(sow_where, ss, se),
                 ),
             )
             if was_created:
                 created_veg += 1
 
-        # Variety entries — inherit the base type's growing data.
-        created_var = 0
-        for (type_name, variety) in VARIETIES:
-            base = VegEntry.objects.filter(name=type_name, variety='').first()
-            if not base:
-                continue
-            vkey = slugify(f"{type_name} {variety}")[:80] or 'veg'
-            _, was_created = VegEntry.objects.get_or_create(
-                key=vkey,
-                defaults=dict(
-                    name=type_name,
-                    variety=variety,
-                    latin_name=base.latin_name,
-                    emoji=base.emoji,
-                    sow_where=base.sow_where,
-                    sow_start=base.sow_start, sow_end=base.sow_end,
-                    sow_outdoors_start=base.sow_outdoors_start, sow_outdoors_end=base.sow_outdoors_end,
-                    sow_covered_start=base.sow_covered_start, sow_covered_end=base.sow_covered_end,
-                    sow_indoors_start=base.sow_indoors_start, sow_indoors_end=base.sow_indoors_end,
-                    plant_out_start=base.plant_out_start, plant_out_end=base.plant_out_end,
-                    harvest_start=base.harvest_start, harvest_end=base.harvest_end,
-                    per_sq_ft=base.per_sq_ft, days_to_harvest=base.days_to_harvest,
-                    notes=base.notes,
-                ),
-            )
-            if was_created:
-                created_var += 1
-
-        # Jobs — attached to the base type and every variety of it.
-        created_jobs = 0
-        for (type_name, month, desc) in VEG_JOBS:
-            for veg in VegEntry.objects.filter(name=type_name):
-                _, was_created = Job.objects.get_or_create(
-                    veg=veg, month=month, description=desc)
-                if was_created:
-                    created_jobs += 1
-
-        # Create one default 4x4 bed only if the user has no plots yet.
         created_plots = 0
-        if not Plot.objects.exists():
-            plot = Plot.objects.create(name='Main Bed', rows=4, cols=4)
-            Cell.objects.bulk_create(
-                [Cell(plot=plot, position=i) for i in range(plot.rows * plot.cols)]
-            )
-            created_plots = 1
+        for i in range(16):
+            _, was_created = Plot.objects.get_or_create(index=i)
+            if was_created:
+                created_plots += 1
 
         self.stdout.write(self.style.SUCCESS(
-            f"seed_defaults: {created_veg} vegetables, {created_var} varieties, "
-            f"{created_jobs} jobs, {created_plots} plots created"
+            f"seed_defaults: {created_veg} vegetables, {created_plots} plots created"
         ))

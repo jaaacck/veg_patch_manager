@@ -3,8 +3,20 @@
 A self-hosted Django port of the Square Foot Garden planner. All data lives in PostgreSQL via Django models, served by a Django REST Framework API and a single-page front-end.
 
 ## Features
+
+- **🗓 Today** — your daily action list: squares **ready to harvest**, what to **sow this month** (frost-aware), and beds with **compost due**.
+- **📱 Installable (PWA)** — add it to your phone's home screen and it works offline (shows your last-loaded data; saving needs a connection).
+- **⚙️ Settings → General** — choose **metric or imperial** weights and set your **last/first frost** dates (used by Today and the Guide).
+- Planting help in the square editor: **crop-rotation warnings**, **companion-planting tips**, and **"sow now" suggestions** for empty squares.
+- **Place catalogue plants** into plant-bed squares, **CSV exports** (harvests + seed list), and a **harvest-by-year** chart.
+- **Designer extras**: rotate/annotate features, a compass + scale bar, and **🖨 Print plan** (print or save your garden map as a PDF).
+
 - **📚 Guide** — month-by-month planting calendar generated from your vegetable DB. Click any plant for full details.
-- **🌱 Garden** — create **multiple named, sized raised beds** (plots). Each plot is a `rows × cols` grid of square-foot squares. Switch between plots, rename, resize, or delete them. Track sowing date, seeds planted, harvested totals, failure totals, and full history per square.
+- **🌱 Garden** — create **multiple named, sized raised beds**. Each bed is a `rows × cols` grid of squares and is one of two **types**:
+  - **Veg bed** — track sowing date, seeds planted, harvested/failure totals (with weight), and full history per square.
+  - **Plant bed** — an ornamental border where each square holds a **plant** (name, latin name, date planted, about, and water / sun / soil preferences).
+  Switch between beds, edit name/type, resize, compost, or delete them.
+- **🗺️ Designer** — a top-down map of your garden. Beds are drawn to scale (showing their contents), snap to a grid, and drag to where each bed actually is; tap one to open it, or hit **Auto-arrange**. **Zoom** in/out, and drop in **features** (paths, walls, lawn, shed, greenhouse, pond, table, stairs, tree, compost) which you can drag, resize, label, and remove. Everything saves automatically and never changes a bed's contents.
 - **📊 Data** — an analytics dashboard with an always-on **Overview** summary and two tabs:
   - **🟩 Beds** — per-bed, with collapsible sections (each shows a one-line stat preview when collapsed): a **yield heatmap of every square** (toggle harvested / success-rate / failures, click a square for its full crop history over time), best/weakest-square rankings, a vegetable performance table (success rate, squares used, actual days-to-harvest), a **plant × square matrix**, and a monthly harvest timeline.
   - **🥕 Plants** — every crop's cross-bed performance: harvested/failed, success rate, squares & beds used, average days-to-harvest, a per-bed breakdown, its best-performing squares, and its sow/harvest window.
@@ -51,7 +63,7 @@ auth on also disables wide-open CORS.
 docker compose exec web python manage.py createsuperuser
 ```
 
-Then visit http://localhost:8000/admin to manage VegEntry / Plot / HistoryEntry records directly.
+Then visit http://localhost:8008/admin to manage VegEntry / Plot / HistoryEntry records directly.
 
 ## API endpoints
 
@@ -69,7 +81,7 @@ All under `/api/`:
 | GET / PATCH / DELETE | `/api/plots/<id>/` | Retrieve / rename + resize (`name`, `rows`, `cols`) / delete |
 | POST | `/api/plots/<id>/reset/` | Clear every square in the plot + wipe its totals/history |
 | GET | `/api/plots/<id>/stats/` | Charting payload (totals, per-vegetable, timeline) |
-| PATCH | `/api/cells/<id>/` | Update a square (`veg_key`, `date_sewed`, `seeds_planted`) |
+| PATCH | `/api/cells/<id>/` | Update a square (`veg_key`, `date_sown`, `seeds_planted`) |
 | POST | `/api/cells/<id>/record_harvest/` | Body `{count}` → adds to total_harvested |
 | POST | `/api/cells/<id>/record_failure/` | Body `{count}` → adds to total_failed |
 | POST | `/api/cells/<id>/clear_plot/` | Clear veg/date/seeds, preserve totals + history |
@@ -79,10 +91,17 @@ All under `/api/`:
 
 ## Data model
 
-- **VegEntry** — `key` (slug, primary key), name, latin_name, emoji, image, sow_where, sow_start/end, harvest_start/end, per_sq_ft, days_to_harvest, notes
-- **Plot** — a named raised bed: `name`, `rows`, `cols` (size in square-foot squares), created_at/updated_at
-- **Cell** — one square within a plot: FK to Plot, `position` (0-based, row-major), FK to VegEntry, date_sewed, seeds_planted, total_harvested, total_failed
-- **HistoryEntry** — FK to **Plot** (charting anchor; survives resizes) + FK to **Cell** (nulled if the square is removed), event_type (planted/harvested/failed/cleared), date, veg_name + veg_key snapshot, count
+- **VegEntry** — one row per **type + variety** (e.g. *Radish — Green Luobo* and *Radish — Winter Radish* are two entries sharing the type "Radish"): `key` (slug, primary key), `name` (type), `variety`, `display_name` (type — variety), latin_name, emoji, image, per-method sow windows (`sow_outdoors_start/end`, `sow_covered_start/end`, `sow_indoors_start/end`, `plant_out_start/end`), harvest_start/end, per_sq_ft, days_to_harvest, notes. (Legacy `sow_where`/`sow_start`/`sow_end` retained for backup compatibility.) The Sow Chart colours each month by activity: sow outdoors = blue, sow outdoors (covered) = blue hatched, sow indoors = green, plant outside = light purple, harvest = red.
+- **Plot** — a named raised bed: `name`, `kind` (veg/plant), `rows`, `cols`, created_at/updated_at
+- **Cell** — one square within a plot: FK to Plot, `position`, FK to VegEntry (the chosen variety) or Plant, date_sown, seeds_planted, totals
+- **Plant** — an ornamental plant for "plant" beds: name, latin_name, date_planted, about, water/sun/soil
+- **Job** — a seasonal task (`description` + `month`) attached to a VegEntry (variety) **or** a Plant. Shown in the **Today** tab when that item is currently in a bed, and on the item's info popups (Guide, Garden square, Sow Chart, Plants).
+- **HistoryEntry** — FK to **Plot** + FK to **Cell**, event_type, date, veg_name (full type — variety snapshot) + veg_key, count, weight, note
+
+## Varieties & Jobs (latest)
+
+- Manage **varieties** in *Settings → Veg* (Type + Variety fields). On a veg-bed square you pick the **type** first, then choose the **variety**. The variety is shown everywhere the vegetable appears.
+- Manage **jobs** in *Settings → Veg* and *Settings → Plants* (a description + a month). API: `/api/jobs/` (filter with `?veg=<key>` or `?plant=<id>`).
 
 ## Persistence
 

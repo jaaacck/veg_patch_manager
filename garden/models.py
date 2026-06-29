@@ -1,15 +1,28 @@
 from django.db import models
+from django.dispatch import receiver
 
 
 class VegEntry(models.Model):
     key = models.CharField(max_length=80, primary_key=True)
-    name = models.CharField(max_length=100)
+    name = models.CharField(max_length=100)          # the base type, e.g. "Radish"
+    variety = models.CharField(max_length=120, blank=True, default="")  # e.g. "Green Luobo"
     latin_name = models.CharField(max_length=120, blank=True, default="")
     emoji = models.CharField(max_length=8, blank=True, default="")
     image = models.ImageField(upload_to='veg_images/', null=True, blank=True)
-    sow_where = models.CharField(max_length=30, default='Outdoors')
+    # Legacy single sow window (kept for backups/compat; the UI now uses the
+    # per-method windows below).
+    sow_where = models.CharField(max_length=30, default='Sow outdoors')
     sow_start = models.IntegerField(default=0)
     sow_end = models.IntegerField(default=0)
+    # Per-method sow windows (month numbers 1-12; 0 = not applicable).
+    sow_outdoors_start = models.IntegerField(default=0)
+    sow_outdoors_end = models.IntegerField(default=0)
+    sow_covered_start = models.IntegerField(default=0)
+    sow_covered_end = models.IntegerField(default=0)
+    sow_indoors_start = models.IntegerField(default=0)
+    sow_indoors_end = models.IntegerField(default=0)
+    plant_out_start = models.IntegerField(default=0)
+    plant_out_end = models.IntegerField(default=0)
     harvest_start = models.IntegerField(default=0)
     harvest_end = models.IntegerField(default=0)
     per_sq_ft = models.FloatField(default=1)
@@ -17,19 +30,35 @@ class VegEntry(models.Model):
     notes = models.TextField(blank=True, default="")
 
     class Meta:
-        ordering = ['name']
+        ordering = ['name', 'variety']
+
+    @property
+    def display_name(self):
+        return f"{self.name} — {self.variety}" if self.variety else self.name
 
     def __str__(self):
-        return self.name
+        return self.display_name
 
 
 class Plot(models.Model):
-    """A named raised bed: a rows x cols grid of square-foot cells."""
+    """A named raised bed: a rows x cols grid of squares.
+
+    `kind` decides what a square holds: a vegetable planting ('veg') or an
+    ornamental Plant ('plant').
+    """
+    VEG = 'veg'
+    PLANT = 'plant'
+    KIND_CHOICES = [(VEG, 'Veg'), (PLANT, 'Plant')]
+
     name = models.CharField(max_length=100)
+    kind = models.CharField(max_length=10, choices=KIND_CHOICES, default=VEG)
     rows = models.IntegerField(default=4)
     cols = models.IntegerField(default=4)
     last_composted = models.DateField(null=True, blank=True)
     notes = models.TextField(blank=True, default="")
+    # Position on the garden Designer canvas, in grid units (1 unit = 1 square foot).
+    layout_x = models.IntegerField(null=True, blank=True)
+    layout_y = models.IntegerField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -48,7 +77,13 @@ class Cell(models.Model):
         VegEntry, null=True, blank=True,
         on_delete=models.SET_NULL, related_name='cells'
     )
-    date_sewed = models.DateField(null=True, blank=True)
+    # In a 'plant' bed the square holds an ornamental Plant from the catalogue.
+    # related_name='cells' makes the relation bidirectional (plant.cells).
+    plant = models.ForeignKey(
+        'Plant', null=True, blank=True,
+        on_delete=models.SET_NULL, related_name='cells'
+    )
+    date_sown = models.DateField(null=True, blank=True)
     seeds_planted = models.IntegerField(default=0)
     total_harvested = models.IntegerField(default=0)
     total_failed = models.IntegerField(default=0)
@@ -69,11 +104,13 @@ class HistoryEntry(models.Model):
     HARVESTED = 'harvested'
     FAILED = 'failed'
     CLEARED = 'cleared'
+    JOB = 'job'
     TYPE_CHOICES = [
         (PLANTED, 'Planted'),
         (HARVESTED, 'Harvested'),
         (FAILED, 'Failed'),
         (CLEARED, 'Cleared'),
+        (JOB, 'Job done'),
     ]
 
     # Anchored to the Plot for charting (survives cell deletion on resize);
@@ -94,3 +131,107 @@ class HistoryEntry(models.Model):
 
     class Meta:
         ordering = ['-date', '-created_at']
+
+
+class Plant(models.Model):
+    """An ornamental plant occupying one square of a 'plant' bed."""
+    name = models.CharField(max_length=120)
+    latin_name = models.CharField(max_length=150, blank=True, default="")
+    date_planted = models.DateField(null=True, blank=True)
+    about = models.TextField(blank=True, default="")
+    water_level = models.CharField(max_length=20, blank=True, default="")
+    sun_level = models.CharField(max_length=30, blank=True, default="")
+    soil_type = models.CharField(max_length=30, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.name
+
+
+class Job(models.Model):
+    """A seasonal task for a vegetable or plant: a description tied to a month.
+
+    Attached to a VegEntry (variety) or a Plant. Surfaces in the Today tab when
+    that item is currently growing in a bed, and on the item's info popups."""
+    veg = models.ForeignKey(
+        VegEntry, null=True, blank=True,
+        on_delete=models.CASCADE, related_name='jobs'
+    )
+    plant = models.ForeignKey(
+        'Plant', null=True, blank=True,
+        on_delete=models.CASCADE, related_name='jobs'
+    )
+    month = models.IntegerField(default=0)  # 1-12 (0 = unset / any time)
+    description = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['month', 'id']
+
+    def __str__(self):
+        return self.description[:40]
+
+
+class Seedling(models.Model):
+    """A batch of seedlings raised in the greenhouse (seeds sown indoors).
+
+    `amount` is the count currently in the greenhouse (reduced when seedlings
+    are transplanted into a bed). `sprouted`/`failed` are running tallies."""
+    veg = models.ForeignKey(
+        VegEntry, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name='seedlings'
+    )
+    date_sown = models.DateField(null=True, blank=True)
+    amount = models.IntegerField(default=0)
+    sprouted = models.IntegerField(default=0)
+    failed = models.IntegerField(default=0)
+    notes = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.veg.display_name if self.veg else '—'} ×{self.amount}"
+
+
+class Photo(models.Model):
+    """A progress photo attached to a square (cell)."""
+    cell = models.ForeignKey(Cell, related_name='photos', on_delete=models.CASCADE)
+    image = models.ImageField(upload_to='cell_photos/')
+    caption = models.CharField(max_length=200, blank=True, default="")
+    taken_on = models.DateField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-taken_on', '-created_at']
+
+
+class Feature(models.Model):
+    """A non-bed element on the garden Designer map (path, shed, lawn, pond, etc.).
+
+    Position (x, y) and size (w, h) are in grid units — 1 unit = 1 square foot.
+    """
+    kind = models.CharField(max_length=20, default='other')
+    label = models.CharField(max_length=60, blank=True, default="")
+    x = models.IntegerField(default=0)
+    y = models.IntegerField(default=0)
+    w = models.IntegerField(default=2)
+    h = models.IntegerField(default=2)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['id']
+
+    def __str__(self):
+        return self.label or self.kind
+
+
+@receiver(models.signals.post_delete, sender=Cell)
+def _cleanup_cell_plant(sender, instance, **kwargs):
+    """Delete the attached Plant when its square is removed (resize / bed delete)."""
+    if instance.plant_id:
+        Plant.objects.filter(pk=instance.plant_id).delete()

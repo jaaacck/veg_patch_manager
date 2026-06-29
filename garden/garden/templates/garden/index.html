@@ -1,0 +1,106 @@
+{% load static %}<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🌱 Square Foot Garden</title>
+<link rel="stylesheet" href="{% static 'garden/app.css' %}">
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <h1>🌱 Square Foot Garden</h1>
+    <p>Your personal planting companion · Django edition</p>
+  </div>
+
+  <nav class="nav">
+    <button class="nav-btn" data-view="guide">📚 Guide</button>
+    <button class="nav-btn" data-view="garden">🌱 Garden</button>
+    <button class="nav-btn" data-view="settings">⚙️ Settings</button>
+  </nav>
+
+  <div class="view" id="view-guide">
+    <div class="guide-search-wrap">
+      <input type="text" class="guide-search-input" id="guideSearch" placeholder="🔍 Search for a plant…" autocomplete="off" oninput="renderSearchResults(this.value)" onfocus="renderSearchResults(this.value)" onblur="setTimeout(closeSearchDropdown, 200)">
+      <div class="search-dropdown" id="searchDropdown"></div>
+    </div>
+    <div class="sow-legend" id="sowLegend"></div>
+    <div class="months" id="months"></div>
+    <div id="monthDetail"></div>
+    <div class="view-footer"><span class="stat-pill">Click any plant for details</span></div>
+  </div>
+
+  <div class="view" id="view-garden">
+    <div class="garden-bed"><div class="grid" id="grid"></div></div>
+    <div class="view-footer">
+      <span class="stat-pill" id="plantedStat">0/16 plots</span>
+      <div class="garden-footer-actions">
+        <button class="mini-btn" onclick="downloadBackup()">📥 Backup</button>
+        <button class="mini-btn" onclick="document.getElementById('restoreFile').click()">📤 Restore</button>
+        <input type="file" id="restoreFile" accept=".json" style="display:none" onchange="restoreBackup(event)">
+        <button class="mini-btn danger" onclick="resetGrid()">Reset all plots</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="view" id="view-settings">
+    <div class="settings-bar">
+      <input type="text" class="search-input" id="vegSearch" placeholder="🔍 Search by name or Latin name…" oninput="renderVegList()">
+      <button class="add-btn" onclick="addNewVeg()">+ Add new</button>
+    </div>
+    <div id="vegList"></div>
+    <div class="settings-footer">
+      <button class="mini-btn" onclick="downloadBackup()">⬇️ Export backup</button>
+      <button class="mini-btn" onclick="document.getElementById('restoreFile2').click()">⬆️ Import backup</button>
+      <input type="file" id="restoreFile2" accept=".json" style="display:none" onchange="restoreBackup(event)">
+    </div>
+  </div>
+</div>
+
+<datalist id="vegDataList"></datalist>
+
+<div class="modal" id="editModal">
+  <div class="modal-content">
+    <h3 id="editModalTitle">Edit plot</h3>
+    <div class="harvest-bubble" id="modalHarvestBubble" style="display:none"></div>
+    <label>Vegetable</label>
+    <input type="text" id="modalVeg" list="vegDataList" placeholder="e.g. Tomatoes">
+    <label>Date sown</label>
+    <input type="date" id="modalDate">
+    <label>Seeds planted</label>
+    <input type="number" id="modalSeeds" min="0" value="1">
+    <label>Notes for this square</label>
+    <textarea id="modalNotes" rows="3" placeholder="variety, seed source, how it's doing…"></textarea>
+    <div class="veg-summary" id="modalSummary" style="display:none"></div>
+
+    <div class="section-title">Plot totals</div>
+    <div class="modal-totals" id="modalTotals"></div>
+    <div class="action-row">
+      <button class="action-btn harvest" onclick="recordHarvest()">🧺 Record harvest</button>
+      <button class="action-btn fail" onclick="recordFailure()">❌ Record failure</button>
+    </div>
+
+    <div class="section-title">Recent activity</div>
+    <div class="history-list" id="modalHistory"></div>
+    <button class="reset-totals-link" onclick="resetPlotTotals()">Reset plot totals &amp; history</button>
+
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeEditModal()">Cancel</button>
+      <button class="btn btn-danger" onclick="clearCell()">Clear plot</button>
+      <button class="btn btn-primary" onclick="saveCell()">Save</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="vegDetailModal">
+  <div class="modal-content">
+    <div id="vegDetailBody"></div>
+    <div class="modal-actions">
+      <button class="btn btn-primary" onclick="closeVegDetail()">Close</button>
+    </div>
+  </div>
+</div>
+
+<script src="{% static 'garden/app.js' %}"></script>
+</body>
+</html>

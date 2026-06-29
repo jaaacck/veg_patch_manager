@@ -27,7 +27,7 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils.text import slugify
 
-from garden.models import VegEntry, Plot, Cell, HistoryEntry
+from garden.models import VegEntry, Plot, Cell, HistoryEntry, Plant, Job
 
 
 # Demo beds created by --fresh (name drives the themed crop pool below).
@@ -60,6 +60,26 @@ HARV_NOTES = ['Great crop', 'Small but tasty', 'Bumper yield', 'A bit woody', 'S
 BED_NOTES = ['South-facing, drains well.', 'Heavy clay — improved with compost each year.',
              'Shadier end of the garden.', 'Slugs are bad here after rain.',
              'Sandy soil, dries out fast in summer.', 'Sheltered spot, warms up early.']
+
+# Jobs for the demo ornamental plants (name -> list of (month, description)).
+PLANT_JOBS = {
+    'Lavender': [(8, 'Trim lightly after flowering to keep it bushy.')],
+    'Rose': [(2, 'Prune hard in late winter.'), (6, 'Feed and mulch; watch for blackspot.')],
+    'Hydrangea': [(3, "Cut back last year's flowered stems above a fat bud.")],
+    'Hosta': [(6, 'Watch for slugs; water well in dry spells.')],
+    'Foxglove': [(6, 'Deadhead the main spike to encourage side shoots.')],
+    'Salvia': [(6, 'Chop back after the first flush for a second show.')],
+}
+
+# (name, latin, water, sun, soil, about) for the demo ornamental bed.
+PLANT_SAMPLES = [
+    ('Lavender', 'Lavandula angustifolia', 'Low', 'Full sun', 'Sandy', 'Fragrant; loved by bees. Trim after flowering.'),
+    ('Rose', 'Rosa', 'Medium', 'Full sun', 'Clay', 'Prune in late winter; feed in spring.'),
+    ('Hydrangea', 'Hydrangea macrophylla', 'High', 'Partial shade', 'Loam', 'Flower colour shifts with soil pH.'),
+    ('Hosta', 'Hosta', 'High', 'Full shade', 'Loam', 'Lush foliage; watch for slugs.'),
+    ('Foxglove', 'Digitalis purpurea', 'Medium', 'Partial shade', 'Loam', 'Biennial; self-seeds freely.'),
+    ('Salvia', 'Salvia nemorosa', 'Low', 'Full sun', 'Sandy', 'Long-flowering; drought-tolerant once set.'),
+]
 HEAVY_CROPPERS = {'tomatoes', 'courgette', 'cucumber', 'french-beans', 'runner-beans', 'peas',
                   'chillies', 'sweet-peppers', 'aubergine', 'swiss-chard', 'lettuce',
                   'salad-leaves', 'kale'}
@@ -70,11 +90,14 @@ def _clamp(v, lo, hi):
 
 
 def _resolve(names, by_key):
+    """Resolve display type names to veg entries — INCLUDING every variety of
+    that type, so the demo plants a spread of varieties (e.g. three Tomatoes)."""
+    by_type = {}
+    for v in by_key.values():
+        by_type.setdefault(v.name.lower(), []).append(v)
     out = []
     for n in names:
-        v = by_key.get(slugify(n)[:80])
-        if v:
-            out.append(v)
+        out.extend(by_type.get(n.strip().lower(), []))
     return out
 
 
@@ -112,8 +135,19 @@ class Command(BaseCommand):
                             help='Delete all plots/history first and build a demo garden.')
         parser.add_argument('--seed', type=int, default=None,
                             help='Random seed for reproducible output.')
+        parser.add_argument('--if-empty', action='store_true',
+                            help='Skip entirely if real data already exists (safe on build).')
 
     def handle(self, *args, **opts):
+        # Build-time guard: never touch a garden that already has real data.
+        if opts.get('if_empty'):
+            has_data = (HistoryEntry.objects.exists()
+                        or Cell.objects.exclude(veg__isnull=True).exists()
+                        or Cell.objects.exclude(plant__isnull=True).exists()
+                        or Plot.objects.exclude(name='Main Bed').exists())
+            if has_data:
+                self.stdout.write("seed_testdata: existing data found — skipping demo seed.")
+                return
         rng = random.Random(opts.get('seed'))
         today = datetime.date.today()
         prev_year = today.year - 1
@@ -134,8 +168,26 @@ class Command(BaseCommand):
                     plot = Plot.objects.create(name=name, rows=r, cols=c)
                     Cell.objects.bulk_create(
                         [Cell(plot=plot, position=i) for i in range(r * c)])
+                # One demo ornamental (plant) bed.
+                pbed = Plot.objects.create(name='Flower Bed', kind=Plot.PLANT, rows=3, cols=3)
+                pbed.last_composted = today - datetime.timedelta(days=rng.randint(30, 200))
+                pbed.notes = 'Mixed ornamental border — year-round colour.'
+                pbed.save(update_fields=['last_composted', 'notes'])
+                pcells = Cell.objects.bulk_create(
+                    [Cell(plot=pbed, position=i) for i in range(9)])
+                samples = PLANT_SAMPLES[:]
+                rng.shuffle(samples)
+                for cell, s in zip(pcells, samples):
+                    cell.plant = Plant.objects.create(
+                        name=s[0], latin_name=s[1], water_level=s[2], sun_level=s[3],
+                        soil_type=s[4], about=s[5],
+                        date_planted=today - datetime.timedelta(days=rng.randint(30, 400)))
+                    cell.save(update_fields=['plant'])
+                    for (mo, desc) in PLANT_JOBS.get(s[0], []):
+                        Job.objects.create(plant=cell.plant, month=mo, description=desc)
 
-            plots = list(Plot.objects.all())
+            # Only veg beds get a generated year of harvest history.
+            plots = list(Plot.objects.filter(kind=Plot.VEG))
             if not plots:
                 plot = Plot.objects.create(name='Main Bed', rows=4, cols=4)
                 Cell.objects.bulk_create([Cell(plot=plot, position=i) for i in range(16)])
@@ -200,7 +252,7 @@ class Command(BaseCommand):
                         hist.append(self._evt(plot, cell, HistoryEntry.PLANTED, v2, sow2,
                                               count=plants2))
                         cell.veg = v2
-                        cell.date_sewed = sow2
+                        cell.date_sown = sow2
                         cell.seeds_planted = plants2
 
                         dth2 = v2.days_to_harvest or 60
@@ -227,7 +279,7 @@ class Command(BaseCommand):
                                 cell_f += fc
                     else:
                         cell.veg = None
-                        cell.date_sewed = None
+                        cell.date_sown = None
                         cell.seeds_planted = 0
 
                     cell.total_harvested = cell_h
@@ -249,7 +301,7 @@ class Command(BaseCommand):
     # ---- helpers ----
     def _evt(self, plot, cell, event_type, veg, date, count=0, note='', weight_g=0):
         return HistoryEntry(plot=plot, cell=cell, event_type=event_type, date=date,
-                            veg_name=veg.name, veg_key=veg.key, count=count, note=note,
+                            veg_name=veg.display_name, veg_key=veg.key, count=count, note=note,
                             weight_g=weight_g)
 
     def _grow(self, rng, plot, cell, veg, sow, fert, end_cap, hist):

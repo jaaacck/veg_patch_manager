@@ -4,6 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>🌱 Square Foot Garden</title>
+<link rel="manifest" href="/static/garden/manifest.webmanifest">
+<meta name="theme-color" content="#2e7d32">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Garden">
+<link rel="apple-touch-icon" href="/static/garden/apple-touch-icon.png">
+<link rel="icon" href="/static/garden/favicon.png">
 <link rel="stylesheet" href="{% static 'garden/app.css' %}">
 </head>
 <body>
@@ -14,12 +21,18 @@
   </div>
 
   <nav class="nav">
+    <button class="nav-btn" data-view="today">🗓 Today</button>
     <button class="nav-btn" data-view="guide">📚 Guide</button>
     <button class="nav-btn" data-view="garden">🌱 Garden</button>
+    <button class="nav-btn" data-view="greenhouse">🪴 Greenhouse</button>
+    <button class="nav-btn" data-view="planner">📅 Planner</button>
+    <button class="nav-btn" data-view="designer">🗺️ Designer</button>
     <button class="nav-btn" data-view="charts">📊 Data</button>
     <button class="nav-btn" data-view="sowchart">🗓️ Sow Chart</button>
     <button class="nav-btn" data-view="settings">⚙️ Settings</button>
   </nav>
+
+  <div class="view" id="view-today"><div id="todayBody"></div></div>
 
   <div class="view" id="view-guide">
     <div class="guide-search-wrap">
@@ -36,8 +49,9 @@
       <div class="plot-tabs" id="plotTabs"></div>
       <div class="plot-bar-actions">
         <button class="mini-btn" onclick="createPlot()">＋ New bed</button>
-        <button class="mini-btn" onclick="renamePlot()">✏️ Rename</button>
+        <button class="mini-btn" onclick="editBed()">✏️ Edit</button>
         <button class="mini-btn" onclick="resizePlot()">📐 Resize</button>
+        <button class="mini-btn" onclick="fillBed()">🌱 Fill empty</button>
         <button class="mini-btn" onclick="addCompost()">🍂 Add compost</button>
         <button class="mini-btn" onclick="openBedNotes()">📝 Notes</button>
         <button class="mini-btn danger" onclick="deletePlot()">🗑 Delete</button>
@@ -57,10 +71,42 @@
     </div>
   </div>
 
+  <div class="view" id="view-greenhouse">
+    <div class="settings-bar">
+      <input type="text" class="search-input" id="ghSearch" placeholder="🔍 Filter by vegetable…" oninput="renderGreenhouse()">
+      <button class="add-btn" onclick="addSeedling()">＋ Sow seedlings</button>
+    </div>
+    <p class="gen-note">Raise seeds indoors here. Record how many sprout or fail, then transplant them into a bed from a square’s <strong>“From greenhouse”</strong> button.</p>
+    <div id="greenhouseBody"></div>
+  </div>
+
+  <div class="view" id="view-planner"><div id="plannerBody"></div></div>
+
+  <div class="view" id="view-designer">
+    <div class="designer-toolbar">
+      <div class="zoom-controls">
+        <button class="mini-btn" onclick="setZoom(-0.25)" aria-label="Zoom out">➖</button>
+        <span class="stat-pill" id="zoomLabel">100%</span>
+        <button class="mini-btn" onclick="setZoom(0.25)" aria-label="Zoom in">➕</button>
+      </div>
+      <span class="map-info">🧭 N↑ · 1 □ = 1&nbsp;ft</span>
+      <button class="mini-btn" onclick="autoArrangeDesigner()">↕️ Auto-arrange</button>
+      <button class="mini-btn save-btn" id="designerSaveBtn" onclick="saveDesigner()" disabled>💾 Save layout</button>
+      <button class="mini-btn" onclick="window.print()">🖨 Print plan</button>
+    </div>
+    <div class="feature-palette" id="featurePalette"></div>
+    <div class="designer-wrap"><div class="designer-canvas" id="designerCanvas"></div></div>
+    <div class="view-footer"><span class="stat-pill" id="designerLegend"></span></div>
+  </div>
+
   <div class="view" id="view-charts">
     <div id="chartsBody"></div>
     <div class="view-footer">
-      <button class="mini-btn" onclick="downloadBackup()">📥 Export data (JSON)</button>
+      <div class="garden-footer-actions">
+        <button class="mini-btn" onclick="exportHarvestCSV()">📄 Harvests (CSV)</button>
+        <button class="mini-btn" onclick="exportSeedList()">🌱 Seed list (CSV)</button>
+        <button class="mini-btn" onclick="downloadBackup()">📥 Backup (JSON)</button>
+      </div>
     </div>
   </div>
 
@@ -68,9 +114,11 @@
     <div class="sowchart-bar">
       <input type="text" class="search-input" id="sowSearch" placeholder="🔍 Filter by name or Latin name…" oninput="renderSowChart()">
       <div class="chart-legend">
-        <span><span class="dot" style="background:var(--primary)"></span>Sow</span>
-        <span><span class="dot" style="background:#f57c00"></span>Harvest</span>
-        <span><span class="dot" style="background:linear-gradient(to bottom,var(--primary) 0 50%,#f57c00 50% 100%)"></span>Both</span>
+        <span><span class="dot" style="background:#1565c0"></span>Sow outdoors</span>
+        <span><span class="dot" style="background:repeating-linear-gradient(45deg,#1565c0,#1565c0 3px,#90caf9 3px,#90caf9 6px)"></span>Sow outdoors (covered)</span>
+        <span><span class="dot" style="background:#2e7d32"></span>Sow indoors</span>
+        <span><span class="dot" style="background:#b39ddb"></span>Plant outside</span>
+        <span><span class="dot" style="background:#d32f2f"></span>Harvest</span>
       </div>
     </div>
     <div class="sow-scroll"><div id="sowChartBody"></div></div>
@@ -78,11 +126,56 @@
   </div>
 
   <div class="view" id="view-settings">
-    <div class="settings-bar">
-      <input type="text" class="search-input" id="vegSearch" placeholder="🔍 Search by name or Latin name…" oninput="renderVegList()">
-      <button class="add-btn" onclick="addNewVeg()">+ Add new</button>
+    <div class="data-tabs" id="settingsTabs">
+      <button class="data-tab" data-stab="veg" onclick="setSettingsTab('veg')">🥕 Veg</button>
+      <button class="data-tab" data-stab="plants" onclick="setSettingsTab('plants')">🌷 Plants</button>
+      <button class="data-tab" data-stab="general" onclick="setSettingsTab('general')">⚙️ General</button>
     </div>
-    <div id="vegList"></div>
+
+    <div id="settings-veg">
+      <div class="settings-bar">
+        <input type="text" class="search-input" id="vegSearch" placeholder="🔍 Search veg by name or Latin name…" oninput="renderVegList()">
+        <button class="add-btn" onclick="addNewVeg()">+ Add new</button>
+      </div>
+      <div id="vegList"></div>
+    </div>
+
+    <div id="settings-plants" style="display:none">
+      <div class="settings-bar">
+        <input type="text" class="search-input" id="plantSearch" placeholder="🔍 Search plants by name, Latin name or bed…" oninput="renderPlantList()">
+        <button class="add-btn" onclick="addNewPlant()">+ Add plant</button>
+      </div>
+      <div id="plantList"></div>
+    </div>
+
+    <div id="settings-general" style="display:none">
+      <div class="gen-settings">
+        <div class="gen-row">
+          <label for="unitSelect">Weight units</label>
+          <select id="unitSelect" onchange="onUnitsChange()">
+            <option value="metric">Metric (g / kg)</option>
+            <option value="imperial">Imperial (oz / lb)</option>
+          </select>
+        </div>
+        <div class="gen-row">
+          <label for="frostLast">Last spring frost</label>
+          <select id="frostLast" onchange="onFrostChange()"></select>
+        </div>
+        <div class="gen-row">
+          <label for="frostFirst">First autumn frost</label>
+          <select id="frostFirst" onchange="onFrostChange()"></select>
+        </div>
+        <div class="gen-row">
+          <label for="geoLat">Location (for weather)</label>
+          <span class="geo-inputs">
+            <input type="number" id="geoLat" step="0.01" placeholder="latitude" onchange="onGeoChange()">
+            <input type="number" id="geoLon" step="0.01" placeholder="longitude" onchange="onGeoChange()">
+          </span>
+        </div>
+        <p class="gen-note">Saved on this device. Frost dates power the Today tab's sowing tips and the Guide markers. Add your latitude/longitude to show a 7-day forecast and frost warnings (uses the free Open-Meteo service).</p>
+      </div>
+    </div>
+
     <div class="settings-footer">
       <button class="mini-btn" onclick="downloadBackup()">⬇️ Export backup</button>
       <button class="mini-btn" onclick="document.getElementById('restoreFile2').click()">⬆️ Import backup</button>
@@ -96,11 +189,15 @@
 <div class="modal" id="editModal">
   <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="editModalTitle">
     <h3 id="editModalTitle">Edit square</h3>
-    <label>Vegetable</label>
-    <input type="text" id="modalVeg" list="vegDataList" placeholder="e.g. Tomatoes">
-    <label>Date sewed</label>
+    <div class="harvest-bubble" id="modalHarvestBubble" style="display:none"></div>
+    <label>Vegetable type</label>
+    <input type="text" id="modalVeg" list="vegDataList" placeholder="e.g. Radish">
+    <label>Variety</label>
+    <select id="modalVariety"></select>
+    <button class="mini-btn gh-from-btn" type="button" onclick="plantFromGreenhouse()">🪴 Plant from greenhouse…</button>
+    <label>Date sown <span class="req">*</span></label>
     <input type="date" id="modalDate">
-    <label>Seeds planted</label>
+    <label>Seeds planted <span class="req">*</span></label>
     <input type="number" id="modalSeeds" min="0" value="1">
     <div class="veg-summary" id="modalSummary" style="display:none"></div>
 
@@ -110,6 +207,10 @@
       <button class="action-btn harvest" onclick="recordHarvest()">🧺 Record harvest</button>
       <button class="action-btn fail" onclick="recordFailure()">❌ Record failure</button>
     </div>
+
+    <div class="section-title">Photos</div>
+    <div class="photo-strip" id="modalPhotos"></div>
+    <button class="mini-btn" type="button" onclick="addCellPhoto()">📷 Add photo</button>
 
     <div class="section-title">Recent activity</div>
     <div class="history-list" id="modalHistory"></div>
@@ -146,6 +247,27 @@
     <div class="modal-actions">
       <button class="btn btn-secondary" onclick="closeRecordModal()">Cancel</button>
       <button class="btn btn-primary" id="recordSaveBtn" onclick="submitRecord()">Save</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="plantModal">
+  <div class="modal-content modal-sm" role="dialog" aria-modal="true" aria-labelledby="plantModalTitle">
+    <h3 id="plantModalTitle">Plant square</h3>
+    <label for="plantPick">Plant <span class="opt">(from your plant database)</span></label>
+    <select id="plantPick" onchange="onPlantPick()"><option value="">— choose a plant —</option></select>
+    <div class="veg-summary" id="plantPickInfo" style="display:none"></div>
+    <div id="plantFields" style="display:none">
+      <label for="plantDate">Planted date</label>
+      <input type="date" id="plantDate">
+      <label for="plantNotes">Notes for this plant</label>
+      <textarea id="plantNotes" rows="3" placeholder="how it's doing, where it came from…"></textarea>
+    </div>
+    <p class="gen-note">Saved on the plant in this square. Add or edit plants in <strong>Settings → Plants</strong>.</p>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closePlantModal()">Cancel</button>
+      <button class="btn btn-danger" id="plantClearBtn" onclick="clearPlant()">Remove</button>
+      <button class="btn btn-primary" id="plantSaveBtn" onclick="savePlant()">Place</button>
     </div>
   </div>
 </div>
@@ -187,5 +309,8 @@
 <div id="toast" class="toast-wrap" aria-live="polite"></div>
 
 <script src="{% static 'garden/app.js' %}"></script>
+<script>
+if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('/sw.js').catch(function(){});});}
+</script>
 </body>
 </html>
